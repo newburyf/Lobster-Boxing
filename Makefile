@@ -10,7 +10,7 @@ INCLUDE_PATHS=-I libraries/SDL3-$(SDL_VERSION)/$(SDL_PLATFORM)/include
 LIBRARIES=-lSDL3
 LIBRARY_PATHS=-L libraries/SDL3-$(SDL_VERSION)/$(SDL_PLATFORM)/lib
 
-%.exe: %.CC
+%.exe: %.c
 	$(CC) $(CFLAGS) $*.c -o $*.exe $(INCLUDE_PATHS) $(LIBRARY_PATHS) $(LIBRARIES)
 
 clean:

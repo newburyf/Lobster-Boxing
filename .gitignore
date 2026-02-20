@@ -1,3 +1,5 @@
+.vscode/
+examples/
 libraries/
 *.dll
 *.exe
