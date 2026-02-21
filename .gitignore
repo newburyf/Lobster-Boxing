@@ -1,5 +1,6 @@
 .vscode/
 examples/
 libraries/
+resources/old
 *.dll
 *.exe
