@@ -6,6 +6,7 @@
 // SDL stuff
 static SDL_Window *window = NULL;
 static SDL_Renderer *renderer = NULL;
+static SDL_Texture *ring;
 #define WINDOW_WIDTH 800
 #define DEGREE_TO_RADIANS 57.3f
 
@@ -81,15 +82,23 @@ typedef struct HITBOX_CIRCLE
 
 #define NUM_HURTBOX_CIRCLES 4
 #define C1_RADIUS 25
-#define C1_Y_OFFSET 45
+#define C1_Y_OFFSET -45
 #define C2_RADIUS 40
 #define C2_Y_OFFSET 0
 #define C3_RADIUS 25
-#define C3_Y_OFFSET -45
+#define C3_Y_OFFSET 45
 #define C4_RADIUS 25
-#define C4_Y_OFFSET -85
+#define C4_Y_OFFSET 85
 #define PUNCHBOX_RADIUS 30
-#define PUNCHBOX_Y_OFFSET 100
+#define PUNCHBOX_Y_OFFSET -100
+
+#define RED_START_X 125
+#define RED_START_Y 500
+#define RED_START_ANGLE 45
+
+#define BLUE_START_X 550
+#define BLUE_START_Y 50
+#define BLUE_START_ANGLE 225 
 
 typedef struct LOBSTER
 {
@@ -102,6 +111,7 @@ typedef struct LOBSTER
     PunchState punchState;
     int timeInPunchState;
     bool lastPunchLeft;
+    bool hitWithPunch;
     bool legsOut;
     SDL_Texture *textures[NUM_TEXTURES];
     bool buttonState[NUM_BUTTONS];
@@ -164,14 +174,15 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
         // setting up other variables
         lobs[j].width = lobs[j].textures[0]->w;
         lobs[j].height = lobs[j].textures[0]->h;
-        lobs[j].x = (float)((WINDOW_WIDTH - lobs[j].width) / 2.0f);
-        lobs[j].y = (float)((WINDOW_WIDTH - lobs[j].height) / 2.0f);
-        lobs[j].angle = 0;
+        // lobs[j].x = (float)((WINDOW_WIDTH - lobs[j].width) / 2.0f);
+        // lobs[j].y = (float)((WINDOW_WIDTH - lobs[j].height) / 2.0f);
+        // lobs[j].angle = 0;
         lobs[j].center.x = lobs[j].width / 2.0f;
         lobs[j].center.y = lobs[j].height / 2.0f;
         lobs[j].punchState = NEUTRAL;
         lobs[j].timeInPunchState = 0;
         lobs[j].lastPunchLeft = true;
+        lobs[j].hitWithPunch = false;
         lobs[j].legsOut = true;
         for(int i = 0; i < NUM_BUTTONS; i++)
         {
@@ -192,6 +203,33 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
 
         lobs[j].punchbox.radius = PUNCHBOX_RADIUS;
         lobs[j].punchbox.y_offset = PUNCHBOX_Y_OFFSET;
+    }
+    lobs[RED].x = RED_START_X;
+    lobs[RED].y = RED_START_Y;
+    lobs[RED].angle = RED_START_ANGLE;
+
+    lobs[BLUE].x = BLUE_START_X;
+    lobs[BLUE].y = BLUE_START_Y;
+    lobs[BLUE].angle = BLUE_START_ANGLE;
+
+    // loading ring
+    char *img_path = NULL;
+    SDL_Surface *surface = NULL;
+    SDL_asprintf(&img_path, "%sresources/%s.png", SDL_GetBasePath(), "ring");
+    surface = SDL_LoadPNG(img_path);
+    SDL_free(img_path);
+    if(!surface)
+    {
+        SDL_Log("Could not load image: %s", SDL_GetError());
+        return SDL_APP_FAILURE;
+    }
+
+    ring = SDL_CreateTextureFromSurface(renderer, surface);
+    SDL_DestroySurface(surface);
+    if(!ring)
+    {
+        SDL_Log("Could not create texture: %s", SDL_GetError());
+        return SDL_APP_FAILURE;
     }
 
     // starting timer
@@ -339,14 +377,14 @@ bool checkPunchCollision(Lobster *punching)
 
     SDL_FPoint punchPoint;
     // SDL_Log("angle: %f, cos: %f, sin: %f", punching->angle, SDL_cosf((punching->angle - 90) / DEGREE_TO_RADIANS), SDL_sinf((punching->angle - 90) / DEGREE_TO_RADIANS));
-    punchPoint.x = punching->x + punching->width / 2.0f + SDL_cosf(-(punching->angle - 90) / DEGREE_TO_RADIANS) * punching->punchbox.y_offset;
-    punchPoint.y = punching->y + punching->height / 2.0f + SDL_sinf(-(punching->angle - 90) / DEGREE_TO_RADIANS) * punching->punchbox.y_offset;
+    punchPoint.x = punching->x + punching->width / 2.0f + SDL_cosf((punching->angle + 90) / DEGREE_TO_RADIANS) * punching->punchbox.y_offset;
+    punchPoint.y = punching->y + punching->height / 2.0f + SDL_sinf((punching->angle + 90) / DEGREE_TO_RADIANS) * punching->punchbox.y_offset;
 
     for(int i = 0; i < NUM_HURTBOX_CIRCLES && !hit; i++)
     {
         SDL_FPoint hurtboxPoint;
-        hurtboxPoint.x = target->x + target->width / 2.0f + SDL_cosf(-(target->angle - 90) / DEGREE_TO_RADIANS) * target->hurtbox[i].y_offset;
-        hurtboxPoint.y = target->y + target->height / 2.0f + SDL_sinf(-(target->angle - 90) / DEGREE_TO_RADIANS) * target->hurtbox[i].y_offset;
+        hurtboxPoint.x = target->x + target->width / 2.0f + SDL_cosf((target->angle + 90) / DEGREE_TO_RADIANS) * target->hurtbox[i].y_offset;
+        hurtboxPoint.y = target->y + target->height / 2.0f + SDL_sinf((target->angle + 90) / DEGREE_TO_RADIANS) * target->hurtbox[i].y_offset;
     
         // SDL_Log("punch coords: (%f,%f), hurtbox coords: (%f,%f)", punchPoint.x, punchPoint.y, hurtboxPoint.x, hurtboxPoint.y);
 
@@ -356,7 +394,6 @@ bool checkPunchCollision(Lobster *punching)
         {
 
             static int counter = 0;
-            SDL_Log("Hit registered! (%d)", counter);
             hit = true;
             counter++;
         }
@@ -386,10 +423,16 @@ void handlePunchStateMachine(Lobster *lob)
             break;
 
         case PUNCH:
-            checkPunchCollision(lob);
+            if(!lob->hitWithPunch)
+            {
+                lobs->hitWithPunch = checkPunchCollision(lob);
+                if(lobs->hitWithPunch)
+                {
+
+                }
+            }
             if(lob->timeInPunchState > PUNCH_TIME_IN_FRAMES)
             {
-                // check collisions here?
                 lob->timeInPunchState = 0;
                 lob->punchState = NEUTRAL;
                 lob->lastPunchLeft = !lob->lastPunchLeft;
@@ -418,6 +461,8 @@ SDL_AppResult SDL_AppIterate(void *appstate)
         
     SDL_SetRenderDrawColor(renderer, 224, 193, 164, SDL_ALPHA_OPAQUE);
     SDL_RenderClear(renderer);
+
+    SDL_RenderTexture(renderer, ring, NULL, NULL);
 
     // drawing lobsters
     for(int i = 0; i < NUM_LOBS; i++)
