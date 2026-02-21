@@ -6,7 +6,6 @@
 // SDL stuff
 static SDL_Window *window = NULL;
 static SDL_Renderer *renderer = NULL;
-static SDL_Texture *ring;
 #define WINDOW_WIDTH 800
 #define DEGREE_TO_RADIANS 57.3f
 
@@ -15,6 +14,7 @@ static SDL_Texture *ring;
 #define LEG_MOVE_RATE_IN_FRAMES 5
 static Uint64 lastFrame = 0;
 static int frameCount = 0;
+#define GAME_OVER_TIME_IN_FRAMES 40
 // lobsters
 #define BTW_PUNCHES_TIME_IN_FRAMES 8
 #define WINDUP_TIME_IN_FRAMES 6
@@ -22,7 +22,36 @@ static int frameCount = 0;
 
 // game constants
 #define MOVE_STEP 5.0f
-#define ANGLE_STEP 2.0f
+#define ANGLE_STEP 4.0f
+
+// ring
+static SDL_Texture *ring;
+#define RING_START_X 50
+#define RING_END_X 750
+#define RING_START_Y 15
+#define RING_END_Y 785
+
+// hearts
+typedef enum HEART_POSITIONS
+{
+    FULL,
+    HALF,
+    EMPTY,
+    NUM_HEARTS,
+} HeartState;
+
+static const char *HEART_TEXTURE_PNG_NAMES[NUM_HEARTS] = 
+{
+    "heart_full",
+    "heart_half",
+    "heart_empty",
+};
+
+#define RED_HEART_X 10
+#define BLUE_HEART_X 740
+#define HEART_Y 740
+
+SDL_Texture *hearts[NUM_HEARTS];
 
 typedef enum PUNCH_STATE
 {
@@ -100,6 +129,7 @@ typedef struct HITBOX_CIRCLE
 #define BLUE_START_Y 50
 #define BLUE_START_ANGLE 225 
 
+
 typedef struct LOBSTER
 {
     float x;
@@ -117,6 +147,9 @@ typedef struct LOBSTER
     bool buttonState[NUM_BUTTONS];
     HitboxCircle hurtbox[NUM_HURTBOX_CIRCLES];
     HitboxCircle punchbox;
+    HeartState heartState;
+    SDL_FPoint heartPos;
+    bool won;
 } Lobster;
 
 enum LOBSTER_POSITIONS
@@ -127,7 +160,42 @@ enum LOBSTER_POSITIONS
 };
 
 // red and blue!
-Lobster lobs[NUM_LOBS];
+static Lobster lobs[NUM_LOBS];
+
+static bool gameOver;
+static int timeInGameOver = 0;
+
+static char* WIN_TEXTURE_PNG_NAMES[NUM_LOBS] = 
+{
+    "red_wins",
+    "blue_wins",
+};
+SDL_Texture *winScreens[NUM_LOBS];
+
+// static bool startGame;
+
+void resetGame()
+{
+    for(int j = 0; j < NUM_LOBS; j++)
+    {
+        lobs[j].punchState = NEUTRAL;
+        lobs[j].timeInPunchState = 0;
+        lobs[j].lastPunchLeft = true;
+        lobs[j].hitWithPunch = false;
+        lobs[j].legsOut = true;
+        
+        lobs[j].heartState = FULL;
+        lobs[j].won = false;
+    }
+
+    lobs[RED].x = RED_START_X;
+    lobs[RED].y = RED_START_Y;
+    lobs[RED].angle = RED_START_ANGLE;
+
+    lobs[BLUE].x = BLUE_START_X;
+    lobs[BLUE].y = BLUE_START_Y;
+    lobs[BLUE].angle = BLUE_START_ANGLE;
+}
 
 SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
 {
@@ -174,16 +242,13 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
         // setting up other variables
         lobs[j].width = lobs[j].textures[0]->w;
         lobs[j].height = lobs[j].textures[0]->h;
-        // lobs[j].x = (float)((WINDOW_WIDTH - lobs[j].width) / 2.0f);
-        // lobs[j].y = (float)((WINDOW_WIDTH - lobs[j].height) / 2.0f);
-        // lobs[j].angle = 0;
         lobs[j].center.x = lobs[j].width / 2.0f;
         lobs[j].center.y = lobs[j].height / 2.0f;
-        lobs[j].punchState = NEUTRAL;
-        lobs[j].timeInPunchState = 0;
-        lobs[j].lastPunchLeft = true;
-        lobs[j].hitWithPunch = false;
-        lobs[j].legsOut = true;
+        // lobs[j].punchState = NEUTRAL;
+        // lobs[j].timeInPunchState = 0;
+        // lobs[j].lastPunchLeft = true;
+        // lobs[j].hitWithPunch = false;
+        // lobs[j].legsOut = true;
         for(int i = 0; i < NUM_BUTTONS; i++)
         {
             lobs[j].buttonState[i] = false;
@@ -203,14 +268,25 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
 
         lobs[j].punchbox.radius = PUNCHBOX_RADIUS;
         lobs[j].punchbox.y_offset = PUNCHBOX_Y_OFFSET;
-    }
-    lobs[RED].x = RED_START_X;
-    lobs[RED].y = RED_START_Y;
-    lobs[RED].angle = RED_START_ANGLE;
+        
+        // lobs[j].heartState = FULL;
+        // lobs[j].won = false;
 
-    lobs[BLUE].x = BLUE_START_X;
-    lobs[BLUE].y = BLUE_START_Y;
-    lobs[BLUE].angle = BLUE_START_ANGLE;
+        
+    }
+    // lobs[RED].x = RED_START_X;
+    // lobs[RED].y = RED_START_Y;
+    // lobs[RED].angle = RED_START_ANGLE;
+    lobs[RED].heartPos.x = RED_HEART_X;
+    lobs[RED].heartPos.y = HEART_Y;
+
+    // lobs[BLUE].x = BLUE_START_X;
+    // lobs[BLUE].y = BLUE_START_Y;
+    // lobs[BLUE].angle = BLUE_START_ANGLE;
+    lobs[BLUE].heartPos.x = BLUE_HEART_X;
+    lobs[BLUE].heartPos.y = HEART_Y;
+
+    resetGame();
 
     // loading ring
     char *img_path = NULL;
@@ -224,6 +300,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
         return SDL_APP_FAILURE;
     }
 
+    // loading ring
     ring = SDL_CreateTextureFromSurface(renderer, surface);
     SDL_DestroySurface(surface);
     if(!ring)
@@ -231,6 +308,53 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
         SDL_Log("Could not create texture: %s", SDL_GetError());
         return SDL_APP_FAILURE;
     }
+
+    // loading hearts
+    for(int i = 0; i < NUM_HEARTS; i++)
+    {
+        char *heart_img_path = NULL;
+        SDL_Surface *heart_surface = NULL;
+        SDL_asprintf(&heart_img_path, "%sresources/%s.png", SDL_GetBasePath(), HEART_TEXTURE_PNG_NAMES[i]);
+        heart_surface = SDL_LoadPNG(heart_img_path);
+        SDL_free(heart_img_path);
+        if(!heart_surface)
+        {
+            SDL_Log("Could not load image: %s", SDL_GetError());
+            return SDL_APP_FAILURE;
+        }
+    
+        hearts[i] = SDL_CreateTextureFromSurface(renderer, heart_surface);
+        SDL_DestroySurface(heart_surface);
+        if(!hearts[i])
+        {
+            SDL_Log("Could not create texture: %s", SDL_GetError());
+            return SDL_APP_FAILURE;
+        }
+    }
+
+    // loading win screens
+    for(int i = 0; i < NUM_LOBS; i++)
+    {
+        char *win_img_path = NULL;
+        SDL_Surface *win_surface = NULL;
+        SDL_asprintf(&win_img_path, "%sresources/%s.png", SDL_GetBasePath(), WIN_TEXTURE_PNG_NAMES[i]);
+        win_surface = SDL_LoadPNG(win_img_path);
+        SDL_free(win_img_path);
+        if(!win_surface)
+        {
+            SDL_Log("Could not load image: %s", SDL_GetError());
+            return SDL_APP_FAILURE;
+        }
+    
+        winScreens[i] = SDL_CreateTextureFromSurface(renderer, win_surface);
+        SDL_DestroySurface(win_surface);
+        if(!win_surface)
+        {
+            SDL_Log("Could not create texture: %s", SDL_GetError());
+            return SDL_APP_FAILURE;
+        }
+    }
+
 
     // starting timer
     lastFrame = SDL_GetTicks();
@@ -292,7 +416,7 @@ void updateButtonState(SDL_Scancode key_code)
 }
 
 SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
-{
+{       
     switch(event->type)
     {
         case SDL_EVENT_QUIT:
@@ -316,32 +440,31 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
         default:
             break;        
     }
-
     return SDL_APP_CONTINUE;
 }
 
 void handleLobsterMovement(Lobster *lob)
 {
     bool movement = false;
-    if(lob->buttonState[UP] && lob->y - MOVE_STEP > 0)
+    if(lob->buttonState[UP] && lob->y - MOVE_STEP > RING_START_Y)
     {
         lob->y -= MOVE_STEP;
         movement = true;
     }
 
-    if(lob->buttonState[DOWN] && lob->y + lob->height + MOVE_STEP < WINDOW_WIDTH)
+    if(lob->buttonState[DOWN] && lob->y + lob->height + MOVE_STEP < RING_END_Y)
     {
         lob->y += MOVE_STEP;
         movement = true;
     }
 
-    if(lob->buttonState[LEFT] && lob->x - MOVE_STEP > 0)
+    if(lob->buttonState[LEFT] && lob->x - MOVE_STEP > RING_START_X)
     {
         lob->x -= MOVE_STEP;
         movement = true;
     }
         
-    if(lob->buttonState[RIGHT] && lob->x + lob->width < WINDOW_WIDTH)
+    if(lob->buttonState[RIGHT] && lob->x + lob->width < RING_END_X)
     {
         lob->x += MOVE_STEP;
         movement = true;
@@ -365,14 +488,8 @@ void handleLobsterMovement(Lobster *lob)
     }
 }
 
-bool checkPunchCollision(Lobster *punching)
+bool checkPunchCollision(Lobster *punching, Lobster *target)
 {
-    Lobster *target = &lobs[BLUE];
-    if(punching == &lobs[BLUE])
-    {
-        target = &lobs[RED];
-    }
-
     bool hit = false;
 
     SDL_FPoint punchPoint;
@@ -423,12 +540,23 @@ void handlePunchStateMachine(Lobster *lob)
             break;
 
         case PUNCH:
+        
             if(!lob->hitWithPunch)
             {
-                lobs->hitWithPunch = checkPunchCollision(lob);
+                Lobster *target = &lobs[BLUE];
+                if(lob == &lobs[BLUE])
+                {
+                    target = &lobs[RED];
+                }
+                lobs->hitWithPunch = checkPunchCollision(lob, target);
                 if(lobs->hitWithPunch)
                 {
-
+                    target->heartState++;
+                    if(target->heartState == EMPTY)
+                    {
+                        lob->won = true;
+                        gameOver = true;
+                    }
                 }
             }
             if(lob->timeInPunchState > PUNCH_TIME_IN_FRAMES)
@@ -436,6 +564,7 @@ void handlePunchStateMachine(Lobster *lob)
                 lob->timeInPunchState = 0;
                 lob->punchState = NEUTRAL;
                 lob->lastPunchLeft = !lob->lastPunchLeft;
+                lob->hitWithPunch = false;
             }
     }
 
@@ -450,47 +579,76 @@ SDL_AppResult SDL_AppIterate(void *appstate)
     {
         frameCount++;
 
-        for(int i = 0; i < NUM_LOBS; i++)
-        {
-            handleLobsterMovement(&lobs[i]);
-            handlePunchStateMachine(&lobs[i]);
-        }
+        SDL_SetRenderDrawColor(renderer, 224, 193, 164, SDL_ALPHA_OPAQUE);
+        SDL_RenderClear(renderer);
 
+        if(gameOver)
+        {
+            timeInGameOver++;
+            SDL_Texture *gameOverScreen = winScreens[RED];
+            if(lobs[BLUE].won)
+            {
+                gameOverScreen = winScreens[BLUE];
+            }
+
+            SDL_RenderTexture(renderer, gameOverScreen, NULL, NULL);
+
+            if(timeInGameOver > GAME_OVER_TIME_IN_FRAMES)
+            {
+                timeInGameOver = 0;
+                gameOver = !gameOver;
+                resetGame();
+            }
+        }
+        else
+        {
+            for(int i = 0; i < NUM_LOBS; i++)
+            {
+                handleLobsterMovement(&lobs[i]);
+                handlePunchStateMachine(&lobs[i]);
+            }
+            
+            
+            SDL_RenderTexture(renderer, ring, NULL, NULL);
+            // drawing lobsters
+            for(int i = 0; i < NUM_LOBS; i++)
+            {
+                SDL_FRect destination;
+                destination.x = lobs[i].x;
+                destination.y = lobs[i].y;
+                destination.w = lobs[i].width;
+                destination.h = lobs[i].height;
+                
+                // SDL_RenderTexture(renderer, texture, NULL, &destination);
+                
+                int textureIndex = 2 * lobs[i].punchState;
+                if(lobs[i].legsOut)
+                {
+                    textureIndex++;
+                }
+                SDL_Texture *toRender = lobs[i].textures[textureIndex];
+            
+                SDL_FlipMode flip = SDL_FLIP_NONE;
+                if(lobs[i].punchState != NEUTRAL && !lobs[i].lastPunchLeft)
+                {
+                    flip = SDL_FLIP_HORIZONTAL;
+                }
+                SDL_RenderTextureRotated(renderer, toRender, NULL, &destination, lobs[i].angle, &lobs[i].center, flip);
+        
+                SDL_Texture *heartTexture = hearts[lobs[i].heartState];
+                SDL_FRect heartDest;
+                heartDest.x = lobs[i].heartPos.x;
+                heartDest.y = lobs[i].heartPos.y;
+                heartDest.w = heartTexture->w;
+                heartDest.h = heartTexture->h;
+                SDL_RenderTexture(renderer, heartTexture, NULL, &heartDest);
+            }
+            
+        }
+        SDL_RenderPresent(renderer);
+        
         lastFrame += FRAME_RATE_IN_MS;
     }
-        
-    SDL_SetRenderDrawColor(renderer, 224, 193, 164, SDL_ALPHA_OPAQUE);
-    SDL_RenderClear(renderer);
-
-    SDL_RenderTexture(renderer, ring, NULL, NULL);
-
-    // drawing lobsters
-    for(int i = 0; i < NUM_LOBS; i++)
-    {
-        SDL_FRect destination;
-        destination.x = lobs[i].x;
-        destination.y = lobs[i].y;
-        destination.w = lobs[i].width;
-        destination.h = lobs[i].height;
-    
-        // SDL_RenderTexture(renderer, texture, NULL, &destination);
-    
-        int textureIndex = 2 * lobs[i].punchState;
-        if(lobs[i].legsOut)
-        {
-            textureIndex++;
-        }
-        SDL_Texture *toRender = lobs[i].textures[textureIndex];
-    
-        SDL_FlipMode flip = SDL_FLIP_NONE;
-        if(lobs[i].punchState != NEUTRAL && !lobs[i].lastPunchLeft)
-        {
-            flip = SDL_FLIP_HORIZONTAL;
-        }
-        SDL_RenderTextureRotated(renderer, toRender, NULL, &destination, lobs[i].angle, &lobs[i].center, flip);
-    }
-
-    SDL_RenderPresent(renderer);
 
     return SDL_APP_CONTINUE;
 }
@@ -502,6 +660,27 @@ void SDL_AppQuit(void *appstate, SDL_AppResult result)
         if(lobs[RED].textures[i] != NULL)
         {
             SDL_DestroyTexture(lobs[RED].textures[i]);
+        }
+    }
+
+    if(ring)
+    {
+        SDL_DestroyTexture(ring);
+    }
+
+    for(int i = 0; i < NUM_HEARTS; i++)
+    {
+        if(hearts[i])
+        {
+            SDL_DestroyTexture(hearts[i]);
+        }
+    }
+
+    for(int i = 0; i < NUM_LOBS; i++)
+    {
+        if(winScreens[i])
+        {
+            SDL_DestroyTexture(winScreens[i]);
         }
     }
 }
