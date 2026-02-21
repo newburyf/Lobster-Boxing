@@ -43,22 +43,22 @@ enum TEXTURE_INDICES
 
 static const char* RED_TEXTURE_PNG_NAMES[NUM_TEXTURES] =
 {
-    "neutral_in",
-    "neutral_out",
-    "windup_in",
-    "windup_out",
-    "punch_in",
-    "punch_out",
+    "red_neutral_in",
+    "red_neutral_out",
+    "red_windup_in",
+    "red_windup_out",
+    "red_punch_in",
+    "red_punch_out",
 };
 
 static const char* BLUE_TEXTURE_PNG_NAMES[NUM_TEXTURES] =
 {
-    "neutral_in",
-    "neutral_out",
-    "windup_in",
-    "windup_out",
-    "punch_in",
-    "punch_out",
+    "blue_neutral_in",
+    "blue_neutral_out",
+    "blue_windup_in",
+    "blue_windup_out",
+    "blue_punch_in",
+    "blue_punch_out",
 };
 
 enum BUTTON_STATE_MAPPING
