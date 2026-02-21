@@ -543,13 +543,13 @@ void handlePunchStateMachine(Lobster *lob)
         
             if(!lob->hitWithPunch)
             {
-                Lobster *target = &lobs[BLUE];
-                if(lob == &lobs[BLUE])
+                Lobster *target = &(lobs[BLUE]);
+                if(lob == &(lobs[BLUE]))
                 {
-                    target = &lobs[RED];
+                    target = &(lobs[RED]);
                 }
-                lobs->hitWithPunch = checkPunchCollision(lob, target);
-                if(lobs->hitWithPunch)
+                lob->hitWithPunch = checkPunchCollision(lob, target);
+                if(lob->hitWithPunch)
                 {
                     target->heartState++;
                     if(target->heartState == EMPTY)
