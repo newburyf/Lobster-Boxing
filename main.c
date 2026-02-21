@@ -7,21 +7,21 @@
 static SDL_Window *window = NULL;
 static SDL_Renderer *renderer = NULL;
 #define WINDOW_WIDTH 800
+#define DEGREE_TO_RADIANS 57.3f
 
 // timing
 #define FRAME_RATE_IN_MS 40
 #define LEG_MOVE_RATE_IN_FRAMES 5
 static Uint64 lastFrame = 0;
 static int frameCount = 0;
-
-// game constants
-#define MOVE_STEP 5.0f
-#define ANGLE_STEP 2.0f
-
 // lobsters
 #define BTW_PUNCHES_TIME_IN_FRAMES 8
 #define WINDUP_TIME_IN_FRAMES 6
 #define PUNCH_TIME_IN_FRAMES 6
+
+// game constants
+#define MOVE_STEP 5.0f
+#define ANGLE_STEP 2.0f
 
 typedef enum PUNCH_STATE
 {
@@ -41,7 +41,7 @@ enum TEXTURE_INDICES
     NUM_TEXTURES,
 };
 
-static char* texture_png_names[NUM_TEXTURES] =
+static const char* RED_TEXTURE_PNG_NAMES[NUM_TEXTURES] =
 {
     "neutral_in",
     "neutral_out",
@@ -51,17 +51,15 @@ static char* texture_png_names[NUM_TEXTURES] =
     "punch_out",
 };
 
-// enum BUTTON_STATE_MAPPING
-// {
-//     W,
-//     A,
-//     S,
-//     D,
-//     Q,
-//     E,
-//     C,
-//     NUM_BUTTONS,
-// };
+static const char* BLUE_TEXTURE_PNG_NAMES[NUM_TEXTURES] =
+{
+    "neutral_in",
+    "neutral_out",
+    "windup_in",
+    "windup_out",
+    "punch_in",
+    "punch_out",
+};
 
 enum BUTTON_STATE_MAPPING
 {
@@ -75,6 +73,23 @@ enum BUTTON_STATE_MAPPING
     NUM_BUTTONS,
 };
 
+typedef struct HITBOX_CIRCLE
+{
+    int radius;
+    int y_offset;
+} HitboxCircle;
+
+#define NUM_HURTBOX_CIRCLES 4
+#define C1_RADIUS 25
+#define C1_Y_OFFSET 45
+#define C2_RADIUS 40
+#define C2_Y_OFFSET 0
+#define C3_RADIUS 25
+#define C3_Y_OFFSET -45
+#define C4_RADIUS 25
+#define C4_Y_OFFSET -85
+#define PUNCHBOX_RADIUS 30
+#define PUNCHBOX_Y_OFFSET 100
 
 typedef struct LOBSTER
 {
@@ -90,10 +105,19 @@ typedef struct LOBSTER
     bool legsOut;
     SDL_Texture *textures[NUM_TEXTURES];
     bool buttonState[NUM_BUTTONS];
+    HitboxCircle hurtbox[NUM_HURTBOX_CIRCLES];
+    HitboxCircle punchbox;
 } Lobster;
 
-// red!
-Lobster red;
+enum LOBSTER_POSITIONS
+{
+    RED,
+    BLUE,
+    NUM_LOBS
+};
+
+// red and blue!
+Lobster lobs[NUM_LOBS];
 
 SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
 {
@@ -110,46 +134,64 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
     }
     SDL_SetRenderLogicalPresentation(renderer, WINDOW_WIDTH, WINDOW_WIDTH, SDL_LOGICAL_PRESENTATION_LETTERBOX);
 
-    // Setting up red!
-
-    // loading textures
-    for(int i = 0; i < NUM_TEXTURES; i++)
+    // Setting up lobs
+    const char **textureNames[NUM_LOBS] = {RED_TEXTURE_PNG_NAMES, BLUE_TEXTURE_PNG_NAMES};
+    for(int j = 0; j < NUM_LOBS; j++)
     {
-        char *img_path = NULL;
-        SDL_Surface *surface = NULL;
-        SDL_asprintf(&img_path, "%sresources/%s.png", SDL_GetBasePath(), texture_png_names[i]);
-        surface = SDL_LoadPNG(img_path);
-        SDL_free(img_path);
-        if(!surface)
+        // loading textures
+        for(int i = 0; i < NUM_TEXTURES; i++)
         {
-            SDL_Log("Could not load image: %s", SDL_GetError());
-            return SDL_APP_FAILURE;
+            char *img_path = NULL;
+            SDL_Surface *surface = NULL;
+            SDL_asprintf(&img_path, "%sresources/%s.png", SDL_GetBasePath(), textureNames[j][i]);
+            surface = SDL_LoadPNG(img_path);
+            SDL_free(img_path);
+            if(!surface)
+            {
+                SDL_Log("Could not load image: %s", SDL_GetError());
+                return SDL_APP_FAILURE;
+            }
+        
+            lobs[j].textures[i] = SDL_CreateTextureFromSurface(renderer, surface);
+            SDL_DestroySurface(surface);
+            if(!lobs[j].textures[i])
+            {
+                SDL_Log("Could not create texture: %s", SDL_GetError());
+                return SDL_APP_FAILURE;
+            }
         }
     
-        red.textures[i] = SDL_CreateTextureFromSurface(renderer, surface);
-        SDL_DestroySurface(surface);
-        if(!red.textures[i])
+        // setting up other variables
+        lobs[j].width = lobs[j].textures[0]->w;
+        lobs[j].height = lobs[j].textures[0]->h;
+        lobs[j].x = (float)((WINDOW_WIDTH - lobs[j].width) / 2.0f);
+        lobs[j].y = (float)((WINDOW_WIDTH - lobs[j].height) / 2.0f);
+        lobs[j].angle = 0;
+        lobs[j].center.x = lobs[j].width / 2.0f;
+        lobs[j].center.y = lobs[j].height / 2.0f;
+        lobs[j].punchState = NEUTRAL;
+        lobs[j].timeInPunchState = 0;
+        lobs[j].lastPunchLeft = true;
+        lobs[j].legsOut = true;
+        for(int i = 0; i < NUM_BUTTONS; i++)
         {
-            SDL_Log("Could not create texture: %s", SDL_GetError());
-            return SDL_APP_FAILURE;
+            lobs[j].buttonState[i] = false;
         }
-    }
 
-    // setting up other variables
-    red.width = red.textures[0]->w;
-    red.height = red.textures[0]->h;
-    red.x = (float)((WINDOW_WIDTH - red.width) / 2.0f);
-    red.y = (float)((WINDOW_WIDTH - red.height) / 2.0f);
-    red.angle = 0;
-    red.center.x = red.width / 2.0f;
-    red.center.y = red.height / 2.0f;
-    red.punchState = NEUTRAL;
-    red.timeInPunchState = 0;
-    red.lastPunchLeft = true;
-    red.legsOut = true;
-    for(int i = 0; i < NUM_BUTTONS; i++)
-    {
-        red.buttonState[i] = false;
+        lobs[j].hurtbox[0].radius = C1_RADIUS;
+        lobs[j].hurtbox[0].y_offset = C1_Y_OFFSET;
+        
+        lobs[j].hurtbox[1].radius = C2_RADIUS;
+        lobs[j].hurtbox[1].y_offset = C2_Y_OFFSET;
+        
+        lobs[j].hurtbox[2].radius = C3_RADIUS;
+        lobs[j].hurtbox[2].y_offset = C3_Y_OFFSET;
+        
+        lobs[j].hurtbox[3].radius = C4_RADIUS;
+        lobs[j].hurtbox[3].y_offset = C4_Y_OFFSET;
+
+        lobs[j].punchbox.radius = PUNCHBOX_RADIUS;
+        lobs[j].punchbox.y_offset = PUNCHBOX_Y_OFFSET;
     }
 
     // starting timer
@@ -163,26 +205,49 @@ void updateButtonState(SDL_Scancode key_code)
     switch(key_code)
     {
         case SDL_SCANCODE_W:
-            red.buttonState[UP] = !red.buttonState[UP];
+            lobs[RED].buttonState[UP] = !lobs[RED].buttonState[UP];
             break;
         case SDL_SCANCODE_A:
-            red.buttonState[LEFT] = !red.buttonState[LEFT];
+            lobs[RED].buttonState[LEFT] = !lobs[RED].buttonState[LEFT];
             break;
         case SDL_SCANCODE_S:
-            red.buttonState[DOWN] = !red.buttonState[DOWN];
+            lobs[RED].buttonState[DOWN] = !lobs[RED].buttonState[DOWN];
             break;
         case SDL_SCANCODE_D:
-            red.buttonState[RIGHT] = !red.buttonState[RIGHT];
+            lobs[RED].buttonState[RIGHT] = !lobs[RED].buttonState[RIGHT];
             break;
         case SDL_SCANCODE_Q:
-            red.buttonState[COUNTER_CLOCKWISE] = !red.buttonState[COUNTER_CLOCKWISE];
+            lobs[RED].buttonState[COUNTER_CLOCKWISE] = !lobs[RED].buttonState[COUNTER_CLOCKWISE];
             break;
         case SDL_SCANCODE_E:
-            red.buttonState[CLOCKWISE] = !red.buttonState[CLOCKWISE];
+            lobs[RED].buttonState[CLOCKWISE] = !lobs[RED].buttonState[CLOCKWISE];
             break;
         case SDL_SCANCODE_C:
-            red.buttonState[START_PUNCH] = !red.buttonState[START_PUNCH];
+            lobs[RED].buttonState[START_PUNCH] = !lobs[RED].buttonState[START_PUNCH];
             break;
+            
+        case SDL_SCANCODE_O:
+            lobs[BLUE].buttonState[UP] = !lobs[BLUE].buttonState[UP];
+            break;
+        case SDL_SCANCODE_K:
+            lobs[BLUE].buttonState[LEFT] = !lobs[BLUE].buttonState[LEFT];
+            break;
+        case SDL_SCANCODE_L:
+            lobs[BLUE].buttonState[DOWN] = !lobs[BLUE].buttonState[DOWN];
+            break;
+        case SDL_SCANCODE_SEMICOLON:
+            lobs[BLUE].buttonState[RIGHT] = !lobs[BLUE].buttonState[RIGHT];
+            break;
+        case SDL_SCANCODE_I:
+            lobs[BLUE].buttonState[COUNTER_CLOCKWISE] = !lobs[BLUE].buttonState[COUNTER_CLOCKWISE];
+            break;
+        case SDL_SCANCODE_P:
+            lobs[BLUE].buttonState[CLOCKWISE] = !lobs[BLUE].buttonState[CLOCKWISE];
+            break;
+        case SDL_SCANCODE_SLASH:
+            lobs[BLUE].buttonState[START_PUNCH] = !lobs[BLUE].buttonState[START_PUNCH];
+            break;
+        
         default:
             break;
     }
@@ -262,6 +327,43 @@ void handleLobsterMovement(Lobster *lob)
     }
 }
 
+bool checkPunchCollision(Lobster *punching)
+{
+    Lobster *target = &lobs[BLUE];
+    if(punching == &lobs[BLUE])
+    {
+        target = &lobs[RED];
+    }
+
+    bool hit = false;
+
+    SDL_FPoint punchPoint;
+    // SDL_Log("angle: %f, cos: %f, sin: %f", punching->angle, SDL_cosf((punching->angle - 90) / DEGREE_TO_RADIANS), SDL_sinf((punching->angle - 90) / DEGREE_TO_RADIANS));
+    punchPoint.x = punching->x + punching->width / 2.0f + SDL_cosf(-(punching->angle - 90) / DEGREE_TO_RADIANS) * punching->punchbox.y_offset;
+    punchPoint.y = punching->y + punching->height / 2.0f + SDL_sinf(-(punching->angle - 90) / DEGREE_TO_RADIANS) * punching->punchbox.y_offset;
+
+    for(int i = 0; i < NUM_HURTBOX_CIRCLES && !hit; i++)
+    {
+        SDL_FPoint hurtboxPoint;
+        hurtboxPoint.x = target->x + target->width / 2.0f + SDL_cosf(-(target->angle - 90) / DEGREE_TO_RADIANS) * target->hurtbox[i].y_offset;
+        hurtboxPoint.y = target->y + target->height / 2.0f + SDL_sinf(-(target->angle - 90) / DEGREE_TO_RADIANS) * target->hurtbox[i].y_offset;
+    
+        // SDL_Log("punch coords: (%f,%f), hurtbox coords: (%f,%f)", punchPoint.x, punchPoint.y, hurtboxPoint.x, hurtboxPoint.y);
+
+        float distance = SDL_sqrtf(SDL_powf(hurtboxPoint.x - punchPoint.x, 2) + SDL_powf(hurtboxPoint.y - punchPoint.y, 2));
+        // SDL_Log("distance: %f, difference: %d", distance, punching->punchbox.radius + target->hurtbox[i].radius);
+        if(distance < punching->punchbox.radius + target->hurtbox[i].radius)
+        {
+
+            static int counter = 0;
+            SDL_Log("Hit registered! (%d)", counter);
+            hit = true;
+            counter++;
+        }
+    }
+    return hit;
+}
+
 void handlePunchStateMachine(Lobster *lob)
 {
     lob->timeInPunchState++;
@@ -284,6 +386,7 @@ void handlePunchStateMachine(Lobster *lob)
             break;
 
         case PUNCH:
+            checkPunchCollision(lob);
             if(lob->timeInPunchState > PUNCH_TIME_IN_FRAMES)
             {
                 // check collisions here?
@@ -304,8 +407,11 @@ SDL_AppResult SDL_AppIterate(void *appstate)
     {
         frameCount++;
 
-        handleLobsterMovement(&red);
-        handlePunchStateMachine(&red);
+        for(int i = 0; i < NUM_LOBS; i++)
+        {
+            handleLobsterMovement(&lobs[i]);
+            handlePunchStateMachine(&lobs[i]);
+        }
 
         lastFrame += FRAME_RATE_IN_MS;
     }
@@ -313,28 +419,31 @@ SDL_AppResult SDL_AppIterate(void *appstate)
     SDL_SetRenderDrawColor(renderer, 224, 193, 164, SDL_ALPHA_OPAQUE);
     SDL_RenderClear(renderer);
 
-    // drawing red
-    SDL_FRect destination;
-    destination.x = red.x;
-    destination.y = red.y;
-    destination.w = red.width;
-    destination.h = red.height;
-
-    // SDL_RenderTexture(renderer, texture, NULL, &destination);
-
-    int textureIndex = 2 * red.punchState;
-    if(red.legsOut)
+    // drawing lobsters
+    for(int i = 0; i < NUM_LOBS; i++)
     {
-        textureIndex++;
+        SDL_FRect destination;
+        destination.x = lobs[i].x;
+        destination.y = lobs[i].y;
+        destination.w = lobs[i].width;
+        destination.h = lobs[i].height;
+    
+        // SDL_RenderTexture(renderer, texture, NULL, &destination);
+    
+        int textureIndex = 2 * lobs[i].punchState;
+        if(lobs[i].legsOut)
+        {
+            textureIndex++;
+        }
+        SDL_Texture *toRender = lobs[i].textures[textureIndex];
+    
+        SDL_FlipMode flip = SDL_FLIP_NONE;
+        if(lobs[i].punchState != NEUTRAL && !lobs[i].lastPunchLeft)
+        {
+            flip = SDL_FLIP_HORIZONTAL;
+        }
+        SDL_RenderTextureRotated(renderer, toRender, NULL, &destination, lobs[i].angle, &lobs[i].center, flip);
     }
-    SDL_Texture *toRender = red.textures[textureIndex];
-
-    SDL_FlipMode flip = SDL_FLIP_NONE;
-    if(red.punchState != NEUTRAL && !red.lastPunchLeft)
-    {
-        flip = SDL_FLIP_HORIZONTAL;
-    }
-    SDL_RenderTextureRotated(renderer, toRender, NULL, &destination, red.angle, &red.center, flip);
 
     SDL_RenderPresent(renderer);
 
@@ -345,9 +454,9 @@ void SDL_AppQuit(void *appstate, SDL_AppResult result)
 {
     for(int i = 0; i < NUM_TEXTURES; i++)
     {
-        if(red.textures[i] != NULL)
+        if(lobs[RED].textures[i] != NULL)
         {
-            SDL_DestroyTexture(red.textures[i]);
+            SDL_DestroyTexture(lobs[RED].textures[i]);
         }
     }
 }
